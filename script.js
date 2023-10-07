@@ -1,89 +1,82 @@
-const video = document.getElementById("video");
+const videoCamera = document.querySelector("#video")
 
-Promise.all([
-  faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
-  faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
-  faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
-]).then(startWebcam);
+async function loadModels() {
+  Promise.all([
+    await faceapi.nets.ssdMobilenetv1.loadFromUri('/models'),
+    await faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+    await faceapi.nets.faceExpressionNet.loadFromUri("/models"),
+    await faceapi.nets.faceRecognitionNet.loadFromUri('/models')
+  ])
+    .then(() => {
+      console.log("load thanh cong cac models")
+    })
+}
 
-
-async function startWebcam() {
-  alert("đã tải các mô hình, bắt đầu khởi động camera");
+function getWebCam() {
   navigator.mediaDevices.getUserMedia({
     video: true,
-    audio: false,
+    audio: false
   })
-    .then(  async (stream) => {
-      video.srcObject = stream;
-     const a = await faceapi.detectSingeFace(video)
-    if(a != undefined){
-      console.log("Điểm số:"+ a.score);
-      console.log("Hộp giới hạn:"+ a.box);
-      console.log(detections);
-    }
+    .then(function (data) {
+      videoCamera.srcObject = data
     })
-    .catch((error) => {
-      alert("lỗi", error);
-    })
-    .finally(()=>{
-      alert("finally")
+    .catch((err) => {
+      console.log("loi", err)
     })
 }
-
-function getLabeledFaceDescriptions() {
-  const labels = ["Felipe", "Messi", "ronaldo"];
-  return Promise.all(
-    labels.map(async (label) => {
-      const descriptions = [];
-      for (let i = 1; i <= 3; i++) {
-        const img = await faceapi.fetchImage(`./labels/${label}/${i}.png`);
-        const detections = await faceapi
-          .detectSingleFace(img)
-          .withFaceLandmarks()
-          .withFaceDescriptor();
-          if (detections.length > 0) {
-            alert("nhan dien")
-          } else {
-            console.log("Không tìm thấy khuôn mặt.");
-          }
-        descriptions.push(detections.descriptor);
-        console.log("mang thong tin"+descriptions[0])
+async function trainingData() {
+  const labels = ['bui xuan thang', 'doan khanh', 'ho chi khanh', 'Messi', 'ronaldo']
+  const labeledFaceDescriptors = []
+  for (const item of labels) {
+    const faceDescriptors = []
+    for (let k = 1; k <= 3; k++) {
+      const image = await faceapi.fetchImage(`labels/${item}/${k}.png`)
+      const detection = await faceapi.detectSingleFace(image)
+        .withFaceLandmarks()
+        .withFaceExpressions()
+        .withFaceDescriptor()
+      if (detection) { // Check if a face was detected in the image
+        faceDescriptors.push(detection.descriptor)
       }
-      return new faceapi.LabeledFaceDescriptors(label, descriptions);
-    })
-  );
+    }
+      const labeledFaceDescriptor = new faceapi.LabeledFaceDescriptors(item, faceDescriptors)
+      labeledFaceDescriptors.push(labeledFaceDescriptor)
+      console.log(`training xong data ${item}`) 
+  }
+  return labeledFaceDescriptors
 }
 
-video.addEventListener("play", async () => {
-  const labeledFaceDescriptors = await getLabeledFaceDescriptions();
-  alert("load thanh cong")
-  const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors);
+getWebCam()
+loadModels()
+let datatraining 
+videoCamera.addEventListener("playing", async () => {
+  datatraining = await trainingData()
+  const canvas = faceapi.createCanvasFromMedia(videoCamera)
+  const faceMatcher = new faceapi.FaceMatcher(datatraining) // Fix this line
 
-  const canvas = faceapi.createCanvasFromMedia(video);
-  document.body.append(canvas);
+  document.body.append(canvas)
+  const displaySize = {
+    width: videoCamera.width,
+    height: videoCamera.height
+  }
+  setInterval(async () => {
+    const detection = await faceapi.detectSingleFace(videoCamera).withFaceLandmarks().withFaceExpressions().withFaceDescriptor()
+      const resizeDetection = faceapi.resizeResults(detection, displaySize)
+      canvas.getContext("2d").clearRect(0, 0, displaySize.width, displaySize.height)
+      console.log(resizeDetection)
+      const drawBox = new faceapi.draw.DrawBox(resizeDetection.detection.box, faceMatcher.findBestMatch(resizeDetection.descriptor) )
+      drawBox.draw(canvas)
+      faceapi.draw.drawFaceLandmarks(canvas, resizeDetection)
 
-  const displaySize = { width: video.width, height: video.height };
-  faceapi.matchDimensions(canvas, displaySize);
+      /**
+       *     for(let k =0;k<resizeDetection.length;k++){
+        const drawBox = new faceapi.draw.DrawBox(resizeDetection[k].detection.box, faceMatcher.findBestMatch(resizeDetection[k].descriptor) )
+        drawBox.draw(canvas)
+        faceapi.draw.drawFaceLandmarks(canvas, resizeDetection[k])
+        faceapi.draw.drawDetections(canvas, resizeDetection[k])
+      }
+       */
+      
+  }, 2000)
 
-     setInterval(async () => {
-    const detections = await faceapi
-      .detectAllFaces(video)
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-
-    const resizedDetections = faceapi.resizeResults(detections, displaySize);
-
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
-
-    const results = resizedDetections.map((d) => {
-      return faceMatcher.findBestMatch(d.descriptor);
-    });
-    results.forEach((result, i) => {
-      const box = resizedDetections[i].detection.box;
-      const drawBox = new faceapi.draw.DrawBox(box, {
-        label: result,
-      });
-      drawBox.draw(canvas);
-    });
-  }, 100);
-});
+})
